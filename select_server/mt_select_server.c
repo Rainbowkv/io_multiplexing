@@ -6,10 +6,20 @@
 #include<arpa/inet.h>
 #include<ctype.h>
 #include<unistd.h>
+#include<pthread.h>
 
 #define SERVER_PORT 7777
 
-void serve_cli(int cfd, fd_set *r_set){
+typedef struct serve_cli_para{
+    int cfd;
+    fd_set *r_set;
+}serve_cli_para;
+
+void serve_cli(void *argv){
+    pthread_t tid = pthread_self();
+    serve_cli_para param = *(serve_cli_para*)argv;
+    int fd = param.fd;
+    fd_set *r_set = param.r_set;
     char data_buf[1024] = {0};
     while(1){
         int len = recv(cfd, data_buf, sizeof(data_buf), 0);  // default behavior to recv
@@ -18,16 +28,17 @@ void serve_cli(int cfd, fd_set *r_set){
             exit(1);
         }
         if(len == 0){
-            printf("Current client connection has closed.\n");
+            printf("Current client connection has closed, thread %lu is exited.\n", tid);
             FD_CLR(cfd, r_set);  // r_set is already a pointer.
             close(cfd);  // unistd.h
+            pthread_exit(NULL);
             break;
         }
-        printf("raw data:\n%s\n", data_buf);
+        printf("thread %lu -> raw data:\n%s\n", tid, data_buf);
         for(int i=0;i<len;i++){
             data_buf[i] = toupper(data_buf[i]);  // ctype.h
         }
-        printf("transformerd data:\n%s\n", data_buf);
+        printf("thread %lu -> transformerd data:\n%s\n", tid, data_buf);
         send(cfd, data_buf, strlen(data_buf), 0);
         memset(data_buf, 0, sizeof(data_buf));
     }
@@ -57,7 +68,9 @@ int main(){
     FD_SET(lfd, &r_set);
     int max_fd = lfd; 
     
+    pthread_t main_tid = pthread_self();
     while(1){
+        printf("main thread %lu is listening and dispatching...", main_tid);
         tmp_set = r_set;
         select(max_fd+1, &tmp_set, NULL, NULL, NULL);  // The last para is timeout.
         if(FD_ISSET(lfd, &tmp_set)){
@@ -72,7 +85,11 @@ int main(){
         }
         for(int i=0;i<=max_fd;i++){
             if(i!=lfd && FD_ISSET(i, &r_set)){
-                serve_cli(i, &r_set);
+                serve_cli_para params;
+                params.fd = i;
+                params.r_set = &r_set;
+                pthread_t tid;
+                pthread_create(%tid, NULL, serve_cli, &params);
             }
         }
     }
