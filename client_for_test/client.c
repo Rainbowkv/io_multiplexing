@@ -45,6 +45,7 @@ int main(int argc, char* argv[]){
             break;
         }
         send(cfd, data_buf, strlen(data_buf), 0);
+	printf("mes has been send.\n");
         memset(data_buf, 0, sizeof(data_buf));
         recv(cfd, data_buf, sizeof(data_buf), 0);
         printf("recv data: %s\n", data_buf);
