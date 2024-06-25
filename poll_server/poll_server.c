@@ -6,22 +6,24 @@
 #include<arpa/inet.h>
 #include<ctype.h>
 #include<unistd.h>
+#include<poll.h>
 
 #define SERVER_PORT 7777
 
 
-static void* accept_connection(int lfd, fd_set *r_set){
+static void* accept_connection(int lfd, struct pollfd *fds){
     struct sockaddr_in cli_addr;
     socklen_t cli_socklen = sizeof(cli_addr);
     int cfd = accept(lfd, (struct sockaddr*)&cli_addr, &cli_socklen);
+    // add cfd to fds
+    fds[cfd].fd = cfd;
     printf("cfd: %d\n", cfd);
     char ip_buf[128];
     printf("client ip: %s, port: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, ip_buf, sizeof(ip_buf)), ntohs(cli_addr.sin_port));  // arpa/inet.h
-    FD_SET(cfd, r_set);
     return NULL;
 }
 
-static void* serve_cli(int cfd, fd_set *r_set){
+static void* serve_cli(int cfd, struct pollfd *fds){
     char data_buf[1024] = {0};
     int len = recv(cfd, data_buf, sizeof(data_buf), 0);  // default behavior to recv
     if(len == -1 || len == 0){  // If len == -1 were to happen, we should have terminated the whole process by using exit(1). But we didn't do so.
@@ -29,7 +31,8 @@ static void* serve_cli(int cfd, fd_set *r_set){
             perror("");
         else 
             printf("Detected the cfd %d has been closed.\n", cfd);
-        FD_CLR(cfd, r_set);
+        // remove cfd from fds
+        fds[cfd].fd = -1;
 	    close(cfd);
         return NULL;
     }
@@ -66,29 +69,31 @@ int main(){
     listen(lfd, 64);
     printf("port: %d, waiing to be connected...\n", ntohs(server_addr.sin_port));
 
-    // set the data struct of select
-    fd_set r_set;
-    FD_ZERO(&r_set);
-    FD_SET(lfd, &r_set);
+    // set the data struct of poll
+    struct pollfd fds[FD_SETSIZE];  // This is the limit of the descriptor table of process, instead of poll.
+    for(int i=0;i<FD_SETSIZE;i++){
+        fds[i].fd = -1;
+        fds[i].events = POLLIN;
+    }
+    fds[0].fd = lfd;
     
     while(1){
         // A terminal hint.
         printf("Main thread is listening...\n");
         
-        // Reset the listen set.
-        fd_set tmp_set = r_set;
+        // Reset is not needed in poll.
         
-        // Sellect I/O Model
-        select(FD_SETSIZE, &tmp_set, NULL, NULL, NULL);  // The last para is timeout.
+        // Poll I/O Model
+        poll(fds, FD_SETSIZE, -1);  // The last para is timeout, -1 indicates unlimited.
         
         // Process connection.
-        if(FD_ISSET(lfd, &tmp_set))
-           accept_connection(lfd, &r_set); 
+        if(fds[0].revents & POLLIN)
+           accept_connection(fds[0].fd, fds); 
 
         // Serve client.
-        for(int i=0;i<FD_SETSIZE;i++)
-            if(i!=lfd && FD_ISSET(i, &tmp_set))
-                serve_cli(i, &r_set);
+        for(int i=1;i<FD_SETSIZE;i++)
+            if(fds[i].revents & POLLIN)
+                serve_cli(fds[i].fd, fds);
     }
     // Close listen fd.
     close(lfd);

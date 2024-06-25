@@ -52,6 +52,7 @@ int main(){
     listen(lfd, 64);
     printf("port: %d, waiing to be connected...\n", ntohs(server_addr.sin_port));
 
+    // set the data struct of select
     fd_set r_set, tmp_set;
     FD_ZERO(&r_set);
     FD_SET(lfd, &r_set);
