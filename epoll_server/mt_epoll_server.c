@@ -109,7 +109,7 @@ int main(){
     pthread_t main_tid = pthread_self();
     while(1){
         // A terminal hint.
-        printf("thread %lx is listening...\n", main_tid);
+        printf("\nthread %lx is listening...\n", main_tid);
         
         // Reset is not needed in epoll.
        
