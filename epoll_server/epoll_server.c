@@ -6,25 +6,28 @@
 #include<arpa/inet.h>
 #include<ctype.h>
 #include<unistd.h>
-#include<poll.h>
+#include<sys/epoll.h>
 
 #define SERVER_PORT 7777
-#define MAX_SIZE 1024
 
-
-static void* accept_connection(int lfd, struct pollfd *fds){
+static void* accept_connection(int lfd, int epfd){
     struct sockaddr_in cli_addr;
     socklen_t cli_socklen = sizeof(cli_addr);
     int cfd = accept(lfd, (struct sockaddr*)&cli_addr, &cli_socklen);
+
     // add cfd to fds
-    fds[cfd].fd = cfd;
+    struct epoll_event epev;
+    epev.data.fd = cfd;
+    epev.events = EPOLLIN;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &epev);
+
     printf("cfd: %d\n", cfd);
     char ip_buf[128];
     printf("client ip: %s, port: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, ip_buf, sizeof(ip_buf)), ntohs(cli_addr.sin_port));  // arpa/inet.h
     return NULL;
 }
 
-static void* serve_cli(int cfd, struct pollfd *fds){
+static void* serve_cli(int cfd, int epfd){
     char data_buf[1024] = {0};
     int len = recv(cfd, data_buf, sizeof(data_buf), 0);  // default behavior to recv
     if(len == -1 || len == 0){  // If len == -1 were to happen, we should have terminated the whole process by using exit(1). But we didn't do so.
@@ -33,7 +36,8 @@ static void* serve_cli(int cfd, struct pollfd *fds){
         else 
             printf("Detected the cfd %d has been closed.\n", cfd);
         // remove cfd from fds
-        fds[cfd].fd = -1;
+    // add cfd to fds
+        epoll_ctl(epfd, EPOLL_CTL_DEL, cfd, NULL);
 	    close(cfd);
         return NULL;
     }
@@ -70,32 +74,31 @@ int main(){
     listen(lfd, 64);
     printf("port: %d, waiing to be connected...\n", ntohs(server_addr.sin_port));
 
-    // set the data struct of poll
-    struct pollfd fds[MAX_SIZE];  // This is the limit of the descriptor table of process, instead of poll.
-
-    for(int i=0;i<MAX_SIZE;i++){
-        fds[i].fd = -1;
-        fds[i].events = POLLIN;
-    }
-    fds[0].fd = lfd;
+    // set the data struct of epoll
+    int epfd = epoll_create(1);  // The para > 0 is right, will be ignored.
+    printf("epfd: %d", epfd);
+    struct epoll_event epev;
+    epev.data.fd = lfd;
+    epev.events = EPOLLIN;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &epev);
     
+#define TMP_SIZE 1024
+    struct epoll_event revents[TMP_SIZE]; 
     while(1){
         // A terminal hint.
         printf("Main thread is listening...\n");
         
-        // Reset is not needed in poll.
-        
-        // Poll I/O Model
-        poll(fds, MAX_SIZE, -1);  // The last para is timeout, -1 indicates unlimited.
-        
-        // Process connection.
-        if(fds[0].revents & POLLIN)
-           accept_connection(fds[0].fd, fds); 
+        // Reset is not needed in epoll.
+       
+        // Epoll I/O Model
+        int num = epoll_wait(epfd, revents, TMP_SIZE, -1);        
 
-        // Serve client.
-        for(int i=1;i<MAX_SIZE;i++)
-            if(fds[i].revents & POLLIN)
-                serve_cli(fds[i].fd, fds);
+        // Process connection.
+        for(int i=0;i<num;i++)
+            if(revents[i].data.fd == lfd)
+                accept_connection(revents[i].data.fd, epfd); 
+            else
+                serve_cli(revents[i].data.fd, epfd);
     }
     // Close listen fd.
     close(lfd);
