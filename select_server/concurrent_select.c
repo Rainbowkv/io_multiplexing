@@ -81,7 +81,7 @@ int main(){
         select(FD_SETSIZE, &tmp_set, NULL, NULL, NULL);  // The last para is timeout.
         
         // Process connection.
-	    if(FD_ISSET(lfd, &tmp_set))
+        if(FD_ISSET(lfd, &tmp_set))
            accept_connection(lfd, &r_set); 
 
         // Serve client.
